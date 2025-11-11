@@ -303,7 +303,7 @@ def _render_scene(
     </html>
     """
 
-    components.html(html_doc, height=600, scrolling=False)
+    components.html(html_doc, height=420, scrolling=False)
 
 
 def _ensure_session() -> None:
@@ -398,12 +398,12 @@ def _get_officer_reply_and_audio(
     """
     system_preamble: str = (
         "You are a seasoned police officer conducting a formal interrogation. "
-        "You are questioning a suspect about breaking into the Louvre and stealing the Mona Lisa. "
-        "Your tone is calm, professional, and precise. "
-        "Keep answers short, serious, and under 20 words. "
+        "You are questioning a suspect about breaking into the Louvre and stealing some crowns ans jewels. "
+        "Your tone is mostly calm, professional, and precise. "
+        "Keep answers under 20 words. "
         "Ask pointed follow-up questions about times, methods, and accomplices. "
-        "Make sure the text includes fitting tags like [angry], [sad], [coughs], [giggles], etc, or sound effects. "
-        "There is room for some humor in this. Perhaps the officer is a bit sarcastic at times. And maybe even bribable?"
+        "Make sure the text includes fitting tags like [angry], [sad], [coughs], [giggles], etc, or sound effects like [shot]. "
+        "There is room for some humor in this. The officer can be sarcastic at times. And maybe he's even bribable."
         "Respond strictly as JSON: {\"text\": \"...\", \"emotion\": \"angry|cynical|happy|neutral|sad|surprised|suspicious\"}."
     )
 
@@ -450,13 +450,41 @@ def main() -> None:
     st.markdown(
         """
         <style>
-        :root { --chat-offset: 220px; }
-        body { background-color: black; }
-        .block-container { padding-top: 0; padding-bottom: 260px; background-color: black; }
+        :root {
+            --stage-h: 420px;         /* video stage height */
+            --chat-input-h: 140px;    /* space reserved for chat input */
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;         /* disable page scroll */
+            background-color: black;
+        }
+
+        .block-container {
+            padding-top: var(--stage-h) !important;                 /* room under fixed video */
+            padding-bottom: calc(var(--chat-input-h) + 20px) !important;
+            background-color: black;
+        }
+
+        /* Pin the components iframe (video stage) to the top */
+        iframe[title="st.iframe"] {
+            position: fixed !important;
+            top: 0; left: 0;
+            width: 100vw !important;
+            height: var(--stage-h) !important;
+            z-index: 9998;
+            border: none;
+            pointer-events: auto;
+            background: black;
+        }
+
+        /* Pin the chat input to the bottom */
         [data-testid="stChatInput"] {
             position: fixed;
-            left: 0; width: 100%;
-            bottom: var(--chat-offset);
+            left: 0; right: 0;
+            bottom: 0;
+            height: var(--chat-input-h);
             z-index: 999999;
             background-color: rgba(0,0,0,0.9);
             border-top: 1px solid rgba(255,255,255,0.1);
@@ -467,7 +495,24 @@ def main() -> None:
             color: #fff !important;
             border: 1px solid rgba(255,255,255,0.2) !important;
         }
-        [data-testid="stChatMessageList"] { padding-bottom: 260px !important; }
+
+        /* Remove Streamlit's default grey focus overlay */
+        [data-testid="stChatInput"] div:has(textarea:focus),
+        [data-testid="stChatInput"] div:hover {
+            background-color: transparent !important;
+            box-shadow: none !important;
+        }
+
+        /* Only the chat history scrolls */
+        [data-testid="stChatMessageList"] {
+            position: fixed !important;
+            top: calc(var(--stage-h) + 8px);
+            left: 0; right: 0;
+            bottom: calc(var(--chat-input-h) + 8px);
+            overflow-y: auto !important;
+            padding: 0 1rem;
+        }
+
         footer, [data-testid="stStatusWidget"] { display: none !important; }
         </style>
         """,
@@ -495,6 +540,21 @@ def main() -> None:
 
     _render_scene(default_loop_src, emotion_loop_src, bg_audio_src, speech_audio_src)
     _render_history()
+
+    # Auto-scroll chat history to bottom
+    st.markdown(
+        """
+        <script>
+        setTimeout(() => {
+          const chatList = parent.document.querySelector('[data-testid="stChatMessageList"]');
+          if (chatList) {
+            chatList.scrollTop = chatList.scrollHeight;
+          }
+        }, 100);
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if st.session_state.pending_user_input:
         user_text = st.session_state.pending_user_input
