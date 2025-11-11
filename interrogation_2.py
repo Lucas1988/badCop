@@ -2,7 +2,7 @@ import os
 import base64
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 import streamlit as st
 import streamlit.components.v1 as components
 from openai import OpenAI
@@ -32,7 +32,7 @@ def _get_base64_video(video_path: Path) -> str:
     :param video_path: Path to the mp4 loop video on disk
     :return: Data URL for inline <video> playback
     """
-    logger.debug(f"Encoding video file: {video_path}")
+    logger.info(f"Encoding video file: {video_path}")
     video_bytes: bytes = video_path.read_bytes()
     b64: str = base64.b64encode(video_bytes).decode("utf-8")
     return f"data:video/mp4;base64,{b64}"
@@ -45,33 +45,32 @@ def _get_base64_audio(audio_path: Path) -> str:
     :param audio_path: Path to tension.mp3 or generated officer speech
     :return: Data URL for inline <audio> playback
     """
-    logger.debug(f"Encoding audio file: {audio_path}")
+    logger.info(f"Encoding audio file: {audio_path}")
     audio_bytes: bytes = audio_path.read_bytes()
     b64: str = base64.b64encode(audio_bytes).decode("utf-8")
     return f"data:audio/mpeg;base64,{b64}"
 
 
 def _render_scene(
-        default_loop_video_src: str,
-        emotion_loop_video_src: str | None,
-        bg_audio_src: str | None,
-        speech_audio_src: str | None,
+    default_loop_video_src: str,
+    emotion_loop_video_src: Optional[str],
+    bg_audio_src: Optional[str],
+    speech_audio_src: Optional[str],
 ) -> None:
     """
-    Render the scene with a default looping interrogation video, an optional emotion-based
-    loop video that is only shown while the speech audio plays, optional background music,
-    and an optional one-shot speech audio clip for the latest reply.
+    Render the scene using a single video element that switches between the default
+    interrogation loop and an optional emotion-specific loop while the speech audio plays.
 
-    :param default_loop_video_src: Base64 data URL for the default loop video
-    :param emotion_loop_video_src: Base64 data URL for the emotion-specific loop video, or None
-    :param bg_audio_src: Base64 data URL for background music, or None
-    :param speech_audio_src: Base64 data URL for officer speech audio, or None
+    :param default_loop_video_src: Base64 data URL or file URL for the default loop video
+    :param emotion_loop_video_src: Base64 data URL or file URL for the emotion-specific loop video, or None
+    :param bg_audio_src: Base64 data URL or file URL for background music, or None
+    :param speech_audio_src: Base64 data URL or file URL for officer speech audio, or None
     :return: None
     """
-    logger.debug("Rendering scene iframe with emotion-based loop video and speech audio.")
+    logger.info("Rendering scene iframe with single video track and speech audio.")
 
     bg_audio_block: str = ""
-    if bg_audio_src is not None:
+    if bg_audio_src:
         bg_audio_block = f"""
         <audio id="bgAudio" loop style="display:none">
             <source src="{bg_audio_src}" type="audio/mpeg">
@@ -80,21 +79,14 @@ def _render_scene(
         """
 
     speech_block: str = ""
-    if speech_audio_src is not None:
+    if speech_audio_src:
         speech_block = f"""
         <audio id="speechAudio" autoplay style="display:none">
             <source src="{speech_audio_src}" type="audio/mpeg">
         </audio>
         """
 
-    emotion_video_block: str = ""
-    if emotion_loop_video_src is not None:
-        emotion_video_block = f"""
-          <video id="emotionVideo" autoplay loop muted playsinline style="position:absolute; top:0; left:0; width:130%; height:auto; display:none;">
-            <source src="{emotion_loop_video_src}" type="video/mp4">
-          </video>
-        """
-
+    # We no longer render a separate overlay video; we only keep one video and swap its src.
     html_doc: str = f"""
     <html>
     <head>
@@ -113,18 +105,34 @@ def _render_scene(
         }}
         .video-stage {{
           position: relative;
-          display: inline-block;
+          display: flex;
+          justify-content: center;
+          align-items: center;
           transform: scale(0.5);
           transform-origin: top center;
+          width: 100%;
+          height: auto;
         }}
         .video-inner {{
           position: relative;
           overflow: hidden;
-        }}
-        #defaultVideo {{
-          display: block;
           width: 130%;
           height: auto;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          background-color: black;
+        }}
+        #mainVideo {{
+          position: relative;
+          display: block;
+          width: 100%;
+          height: auto;
+          max-width: 100%;
+          max-height: 100%;
+          object-fit: contain;
+          object-position: center center;
+          z-index: 1;
         }}
         .music-btn {{
           position: fixed;
@@ -149,10 +157,9 @@ def _render_scene(
     <body>
       <div class="video-stage">
         <div class="video-inner">
-          <video id="defaultVideo" autoplay loop muted playsinline>
+          <video id="mainVideo" autoplay loop muted playsinline>
             <source src="{default_loop_video_src}" type="video/mp4">
           </video>
-          {emotion_video_block}
         </div>
       </div>
 
@@ -160,60 +167,91 @@ def _render_scene(
       {speech_block}
 
     <script>
+    // Unlock autoplay for later use
+    document.addEventListener("click", enableMedia);
+    document.addEventListener("keydown", enableMedia);
+
+    function enableMedia() {{
+      const vids = document.querySelectorAll("video, audio");
+      vids.forEach(v => {{
+        try {{
+          v.play().then(() => {{
+            v.pause();
+          }}).catch(() => {{}});
+        }} catch (e) {{}}
+      }});
+      document.removeEventListener("click", enableMedia);
+      document.removeEventListener("keydown", enableMedia);
+    }}
+
     const btn = document.getElementById("musicBtn");
     const audio = document.getElementById("bgAudio");
-    const defaultVideo = document.getElementById("defaultVideo");
-    const emotionVideo = document.getElementById("emotionVideo");
+    const mainVideo = document.getElementById("mainVideo");
     const speechAudio = document.getElementById("speechAudio");
 
-    function showDefaultVideo() {{
-      if (defaultVideo) {{
-        defaultVideo.style.display = "block";
+    const defaultSrc = "{default_loop_video_src}";
+    const emotionSrc = "{emotion_loop_video_src or ""}";
+
+    function playDefaultLoop() {{
+      if (!mainVideo) return;
+      if (!defaultSrc) return;
+      mainVideo.pause();
+      // For data URLs we can just set src attribute directly
+      if (mainVideo.firstElementChild && mainVideo.firstElementChild.tagName === "SOURCE") {{
+        mainVideo.firstElementChild.setAttribute("src", defaultSrc);
+      }} else {{
+        mainVideo.setAttribute("src", defaultSrc);
       }}
-      if (emotionVideo) {{
-        emotionVideo.style.display = "none";
-      }}
+      try {{
+        mainVideo.load();
+      }} catch (e) {{}}
+      mainVideo.loop = true;
+      mainVideo.muted = true;
+      mainVideo.playsInline = true;
+      mainVideo.play().catch(() => {{}});
     }}
 
-    function showEmotionVideo() {{
-      if (!emotionVideo) {{
-        return;
+    function playEmotionLoop() {{
+      if (!mainVideo) return;
+      if (!emotionSrc) return;
+      mainVideo.pause();
+      if (mainVideo.firstElementChild && mainVideo.firstElementChild.tagName === "SOURCE") {{
+        mainVideo.firstElementChild.setAttribute("src", emotionSrc);
+      }} else {{
+        mainVideo.setAttribute("src", emotionSrc);
       }}
-      emotionVideo.style.display = "block";
-      if (defaultVideo) {{
-        defaultVideo.style.display = "none";
-      }}
+      try {{
+        mainVideo.load();
+      }} catch (e) {{}}
+      mainVideo.loop = true;
+      mainVideo.muted = true;  // ensure autoplay is allowed
+      mainVideo.playsInline = true;
+      mainVideo.play().catch(() => {{}});
     }}
 
-    // Initial state: default video visible
-    showDefaultVideo();
+    // Initial state: default loop
+    playDefaultLoop();
 
     if (speechAudio) {{
       speechAudio.addEventListener("play", () => {{
-        if (emotionVideo) {{
-          showEmotionVideo();
+        if (emotionSrc) {{
+          playEmotionLoop();
         }}
       }});
-
-      const backToDefault = () => {{
-        showDefaultVideo();
-      }};
-
-      speechAudio.addEventListener("ended", backToDefault);
+      speechAudio.addEventListener("ended", () => {{
+        playDefaultLoop();
+      }});
       speechAudio.addEventListener("pause", () => {{
         if (speechAudio.duration && (speechAudio.currentTime >= speechAudio.duration - 0.1)) {{
-          backToDefault();
+          playDefaultLoop();
         }}
       }});
     }}
 
     if (btn && audio) {{
       audio.volume = 0.15;
-
-      // Default OFF unless explicitly enabled before
       const stored = localStorage.getItem("musicEnabled");
       const enabled = stored === "1";
-
       if (enabled) {{
         btn.classList.add("active");
         audio.play().catch(() => {{}});
@@ -221,7 +259,6 @@ def _render_scene(
         btn.classList.remove("active");
         audio.pause();
       }}
-
       btn.addEventListener("click", () => {{
         const nowEnabled = btn.classList.toggle("active");
         localStorage.setItem("musicEnabled", nowEnabled ? "1" : "0");
@@ -242,152 +279,83 @@ def _render_scene(
 
 
 def _ensure_session() -> None:
-    """
-    Initialize Streamlit session state for messages and media.
-
-    :return: None
-    """
     if "messages" not in st.session_state:
         st.session_state.messages = []
-        logger.info("Session message state initialized.")
-
     if "emotion_loop_b64" not in st.session_state:
         st.session_state.emotion_loop_b64 = None
-        logger.info("Session emotion-based loop video state initialized.")
-
     if "speech_audio_b64" not in st.session_state:
         st.session_state.speech_audio_b64 = None
-        logger.info("Session speech audio state initialized.")
-
     if "pending_user_input" not in st.session_state:
         st.session_state.pending_user_input = None
 
 
 def _append_user_message(text: str) -> None:
-    """
-    Append a user message to chat history.
-
-    :param text: The user's message text
-    :return: None
-    """
     st.session_state.messages.append({"role": "user", "content": text})
     logger.info(f"User message: {text}")
 
 
 def _append_assistant_message(text: str) -> None:
-    """
-    Append assistant message to chat history.
-
-    :param text: The assistant's message text
-    :return: None
-    """
     st.session_state.messages.append({"role": "assistant", "content": text})
     logger.info(f"Assistant reply logged: {text}")
 
 
 def _render_history() -> None:
-    """
-    Render the chat history using Streamlit chat components.
-
-    :return: None
-    """
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
 
-def _generate_officer_audio(spoken_text: str) -> Path | None:
+def _generate_officer_audio(spoken_text: str) -> Optional[Path]:
     """
-    Generate an ElevenLabs audio clip of the interrogation officer delivering the given line.
+    Generate officer speech using ElevenLabs and save as MP3.
 
-    :param spoken_text: The line the officer should speak
-    :return: Path to the generated MP3 file, or None on failure
+    :param spoken_text: The officer's spoken line
+    :return: Path to generated MP3 or None if failed
     """
-    api_key: str | None = os.environ.get("ELEVENLABS_API_KEY")
+    api_key: Optional[str] = os.environ.get("ELEVENLABS_API_KEY")
     if not api_key:
-        logger.error("ELEVENLABS_API_KEY is not set, cannot generate officer audio.")
         return None
-
     voice_id: str = "VMEiS9pN5WcJdwYFOr4i"
     url: str = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-
-    payload: dict[str, Any] = {
-        "text": spoken_text,
-        "model_id": "eleven_v3",
-    }
-
+    payload: dict[str, Any] = {"text": spoken_text, "model_id": "eleven_v3"}
     headers: dict[str, str] = {
         "xi-api-key": api_key,
         "Content-Type": "application/json",
         "Accept": "audio/mpeg",
     }
-
     try:
-        logger.info("Calling ElevenLabs TTS API for officer audio.")
         response = requests.post(url, headers=headers, json=payload, timeout=60)
         response.raise_for_status()
     except Exception as exc:
-        logger.exception(f"Error while calling ElevenLabs TTS API: {exc}")
+        logger.exception(f"ElevenLabs error: {exc}")
         return None
-
-    filename: Path = Path().joinpath(f"{secrets.token_hex(6)}.mp3")
+    filename: Path = Path(f"{secrets.token_hex(6)}.mp3")
     filename.write_bytes(response.content)
-    logger.info(f"Generated officer audio saved to {filename}")
     return filename
 
 
-def _choose_loop_video_for_emotion(emotion: str) -> Path | None:
-    """
-    Choose a random loop video for the given emotion from the static folder.
-
-    :param emotion: Emotion label such as 'angry', 'sad', or 'neutral'
-    :return: Path to a matching MP4 file, or None if no match is found
-    """
+def _choose_loop_video_for_emotion(emotion: str) -> Optional[Path]:
     static_dir: Path = Path().joinpath("static")
-    if not static_dir.exists():
-        logger.error(f"Static directory not found: {static_dir}")
-        return None
-
-    # 1. Try emotion-specific videos
     pattern: str = f"officer_{emotion}*.mp4"
     matches: list[Path] = list(static_dir.glob(pattern))
-
-    # 2. If no emotion matches → try neutral variants
+    logger.info(f"Choosing loop video for emotion '{emotion}'. Found {len(matches)} matches.")
     if not matches:
-        logger.warning(
-            f"No videos found for emotion '{emotion}', trying neutral variants."
-        )
+        logger.info("No matching emotion video found, defaulting to neutral.")
         matches = list(static_dir.glob("officer_neutral.mp4"))
-
-    # 3. If still nothing → fallback to specific neutral file
     if not matches:
-        fallback: Path = static_dir.joinpath("officer_neutral.mp4")
-        if fallback.exists():
-            logger.warning(
-                f"No variant videos found. Falling back to single '{fallback}'."
-            )
-            return fallback
-
-        logger.error("No suitable loop videos found for any emotion.")
         return None
-
-    # 4. If matches exist → choose a random one
-    chosen: Path = secrets.choice(matches)
-    logger.info(f"Chosen loop video for emotion '{emotion}': {chosen}")
-    return chosen
+    return secrets.choice(matches)
 
 
 def _get_officer_reply_and_audio(
-        user_text: str, history: list[dict[str, str]]
-) -> tuple[str, str, str | None]:
+    user_text: str, history: list[dict[str, str]]
+) -> tuple[str, str, Optional[str]]:
     """
-    Get a GPT-5-nano interrogation reply as JSON with text and emotion,
-    then synthesize the spoken line with ElevenLabs. Uses streaming so that
-    the raw JSON is logged as it becomes available.
+    Get the officer's LLM reply and corresponding generated audio, without streaming.
 
-    :param user_text: Latest suspect input
-    :param history: Chat history so far
-    :return: Tuple of (reply text for display and TTS, emotion label, base64 audio or None)
+    :param user_text: Latest user message
+    :param history: Chat history (list of message dicts)
+    :return: Tuple of (reply text, emotion label, base64 audio string or None)
     """
     system_preamble: str = (
         "You are a seasoned police officer conducting a formal interrogation. "
@@ -395,92 +363,59 @@ def _get_officer_reply_and_audio(
         "Your tone is calm, professional, and precise. "
         "Keep answers short, serious, and under 20 words. "
         "Ask pointed follow-up questions about times, methods, and accomplices. "
-        "Respond strictly as a JSON object with the following structure: "
-        '{"text": "<officer reply including expressive tags like <sigh>, <angry>, <giggles>, etc.>", '
-        '"emotion": "angry|sad|neutral"}. '
-        "Pick 'angry' when you are confronting lies or contradictions, 'sad' when expressing disappointment, "
-        "and 'neutral' for matter-of-fact questioning."
+        "Make sure the text includes tags like <angry>, <sad>, <coughs>, <giggles>, etc. to indicate the tone. "
+        "Respond strictly as JSON: {\"text\": \"...\", \"emotion\": \"angry|sad|neutral\"}."
     )
 
-    messages_for_llm: list[dict[str, str]] = [{"role": "system", "content": system_preamble}]
-    messages_for_llm.extend(history)
-    messages_for_llm.append({"role": "user", "content": user_text})
+    messages_for_llm = [
+        {"role": "system", "content": system_preamble},
+        *history,
+        {"role": "user", "content": user_text},
+    ]
 
-    openai_api_key: str | None = os.environ.get("OPENAI_API_KEY")
-    if not openai_api_key:
-        logger.error("OPENAI_API_KEY is not set, cannot contact GPT model.")
-        error_text: str = "Interrogation system is unavailable due to missing configuration."
-        return error_text, "neutral", None
-
-    client = OpenAI(api_key=openai_api_key)
-    model_name: str = os.environ.get("MODEL_NAME", "gpt-5-nano")
-
-    logger.info(
-        f"Sending prompt to model '{model_name}' with {len(messages_for_llm)} messages (streaming enabled)."
-    )
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
     try:
-        streamed_chunks: list[str] = []
-        stream: Any = client.chat.completions.create(
-            model=model_name,
+        response = client.chat.completions.create(
+            model=os.environ.get("MODEL_NAME", "gpt-5-nano"),
             messages=messages_for_llm,
             response_format={"type": "json_object"},
-            stream=True,
         )
-
-        for chunk in stream:
-            delta_content: str | None = None
-            choice = chunk.choices[0] if chunk.choices else None
-            if choice and choice.delta and choice.delta.content:
-                delta_content = choice.delta.content
-            if delta_content:
-                streamed_chunks.append(delta_content)
-                logger.info(f"Streaming chunk: {delta_content}")
-
-        raw_content: str = "".join(streamed_chunks).strip()
-        logger.info(f"Full streamed model JSON response: {raw_content}")
-        parsed: dict[str, Any] = json.loads(raw_content)
-        reply_text: str = str(parsed.get("text", "")).strip()
-        emotion: str = str(parsed.get("emotion", "neutral")).strip().lower()
-        if emotion not in {"angry", "sad", "neutral"}:
-            logger.warning(f"Unexpected emotion '{emotion}' from model, normalizing to 'neutral'.")
-            emotion = "neutral"
-        logger.info(f"Model response text: {reply_text} | emotion: {emotion}")
+        content = response.choices[0].message.content
+        logger.info(f"Assistant raw output: {content}")
     except Exception as exc:
-        logger.exception(f"Error calling GPT model: {exc}")
-        error_text = f"Error contacting interrogation system: {exc}"
-        return error_text, "neutral", None
+        logger.exception(f"LLM request failed: {exc}")
+        return "", "neutral", None
 
-    audio_path: Path | None = _generate_officer_audio(reply_text)
-    if audio_path is None:
-        return reply_text, emotion, None
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as exc:
+        logger.exception(f"Invalid JSON from model: {content}")
+        return "", "neutral", None
 
-    audio_b64: str = _get_base64_audio(audio_path)
-    return reply_text, emotion, audio_b64
+    text: str = data.get("text", "")
+    emotion: str = data.get("emotion", "neutral")
+
+    audio_path = _generate_officer_audio(text)
+    audio_b64 = _get_base64_audio(audio_path) if audio_path else None
+
+    return text, emotion, audio_b64
 
 
 def main() -> None:
     """
-    Run the interrogation Streamlit app.
-
-    :return: None
+    Main entry point for the interrogation chat app.
     """
     st.set_page_config(page_title="Interrogation Chat", page_icon="🕵️", layout="wide")
-
     st.markdown(
         """
         <style>
         :root { --chat-offset: 220px; }
         body { background-color: black; }
-        .block-container {
-            padding-top: 0;
-            padding-bottom: 260px;
-            background-color: black;
-        }
+        .block-container { padding-top: 0; padding-bottom: 260px; background-color: black; }
         [data-testid="stChatInput"] {
             position: fixed;
-            left: 0;
-            width: 100%;
+            left: 0; width: 100%;
             bottom: var(--chat-offset);
             z-index: 999999;
             background-color: rgba(0,0,0,0.9);
@@ -492,9 +427,7 @@ def main() -> None:
             color: #fff !important;
             border: 1px solid rgba(255,255,255,0.2) !important;
         }
-        [data-testid="stChatMessageList"] {
-            padding-bottom: 260px !important;
-        }
+        [data-testid="stChatMessageList"] { padding-bottom: 260px !important; }
         footer, [data-testid="stStatusWidget"] { display: none !important; }
         </style>
         """,
@@ -503,60 +436,38 @@ def main() -> None:
 
     _ensure_session()
 
-    default_loop_path: Path = Path().joinpath("static/police_officer.mp4")
-    bg_audio_path: Path = Path().joinpath("static/tension.mp3")
+    default_loop_path = Path().joinpath("static", "police_officer.mp4")
+    bg_audio_path = Path().joinpath("static", "tension.mp3")
 
     if not default_loop_path.exists():
         st.error("Video file not found (expected 'static/police_officer.mp4').")
-        default_loop_src: str = ""
-    else:
-        default_loop_src = _get_base64_video(default_loop_path)
+        return
 
-    bg_audio_src: str | None = _get_base64_audio(bg_audio_path) if bg_audio_path.exists() else None
-    emotion_loop_src: str | None = st.session_state.emotion_loop_b64
-    speech_audio_src: str | None = st.session_state.speech_audio_b64
+    default_loop_src = _get_base64_video(default_loop_path)
+    bg_audio_src = _get_base64_audio(bg_audio_path) if bg_audio_path.exists() else None
+    emotion_loop_src = st.session_state.emotion_loop_b64
+    speech_audio_src = st.session_state.speech_audio_b64
 
-    # Chat input first so the new user message appears immediately in history
-    user_input: str | None = st.chat_input("Type your message...")
+    user_input = st.chat_input("Type your message...")
     if user_input:
         _append_user_message(user_input)
         st.session_state.pending_user_input = user_input
 
-    if default_loop_src:
-        _render_scene(
-            default_loop_video_src=default_loop_src,
-            emotion_loop_video_src=emotion_loop_src,
-            bg_audio_src=bg_audio_src,
-            speech_audio_src=speech_audio_src,
-        )
-
+    _render_scene(default_loop_src, emotion_loop_src, bg_audio_src, speech_audio_src)
     _render_history()
 
     if st.session_state.pending_user_input:
-        latest_user_text: str = st.session_state.pending_user_input
-
+        user_text = st.session_state.pending_user_input
         with st.chat_message("assistant"):
-            reply_text, emotion, speech_audio_b64 = _get_officer_reply_and_audio(
-                latest_user_text,
-                st.session_state.messages[:-1],
+            reply, emotion, speech_b64 = _get_officer_reply_and_audio(
+                user_text, st.session_state.messages[:-1]
             )
-            st.markdown(reply_text)
-
-        _append_assistant_message(reply_text)
-
-        st.session_state.speech_audio_b64 = speech_audio_b64
-
-        emotion_video_path: Path | None = _choose_loop_video_for_emotion(emotion)
-        if emotion_video_path is not None:
-            try:
-                st.session_state.emotion_loop_b64 = _get_base64_video(emotion_video_path)
-            except Exception as exc:
-                logger.exception(f"Failed to encode emotion loop video '{emotion_video_path}': {exc}")
-
-        logger.info(
-            f"Updated session speech_audio_b64 set: {speech_audio_b64 is not None}"
-        )
-
+            st.markdown(reply)
+        _append_assistant_message(reply)
+        st.session_state.speech_audio_b64 = speech_b64
+        path = _choose_loop_video_for_emotion(emotion)
+        if path:
+            st.session_state.emotion_loop_b64 = _get_base64_video(path)
         st.session_state.pending_user_input = None
         st.rerun()
 
