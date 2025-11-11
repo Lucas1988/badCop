@@ -91,7 +91,7 @@ def _generate_officer_video(spoken_text: str) -> str | None:
     :param spoken_text: The line the officer should 'say'
     :return: A base64 data URL string for the resulting MP4 clip, or None on failure
     """
-    openai_api_key: str | None = "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"
+    openai_api_key: str | None = os.environ.get("OPENAI_API_KEY")
 
     client = OpenAI(api_key=openai_api_key)
 
@@ -394,7 +394,7 @@ def _get_officer_reply_and_clip(
     messages_for_llm.extend(history)
     messages_for_llm.append({"role": "user", "content": user_text})
 
-    openai_api_key: str | None = "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"
+    openai_api_key: str | None = os.environ.get("OPENAI_API_KEY")
 
     client = OpenAI(api_key=openai_api_key)
     model_name: str = os.environ.get("MODEL_NAME", "gpt-5-nano")
