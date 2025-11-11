@@ -52,10 +52,10 @@ def _get_base64_audio(audio_path: Path) -> str:
 
 
 def _render_scene(
-    default_loop_video_src: str,
-    emotion_loop_video_src: Optional[str],
-    bg_audio_src: Optional[str],
-    speech_audio_src: Optional[str],
+        default_loop_video_src: str,
+        emotion_loop_video_src: Optional[str],
+        bg_audio_src: Optional[str],
+        speech_audio_src: Optional[str],
 ) -> None:
     """
     Render the scene using a single video element that switches between the default
@@ -86,7 +86,6 @@ def _render_scene(
         </audio>
         """
 
-    # We no longer render a separate overlay video; we only keep one video and swap its src.
     html_doc: str = f"""
     <html>
     <head>
@@ -193,10 +192,14 @@ def _render_scene(
     const emotionSrc = "{emotion_loop_video_src or ""}";
 
     function playDefaultLoop() {{
-      if (!mainVideo) return;
-      if (!defaultSrc) return;
+      if (!mainVideo || !defaultSrc) return;
+      if (mainVideo.getAttribute("data-current") === "default") {{
+        if (mainVideo.paused) {{
+          mainVideo.play().catch(() => {{}});
+        }}
+        return;
+      }}
       mainVideo.pause();
-      // For data URLs we can just set src attribute directly
       if (mainVideo.firstElementChild && mainVideo.firstElementChild.tagName === "SOURCE") {{
         mainVideo.firstElementChild.setAttribute("src", defaultSrc);
       }} else {{
@@ -208,12 +211,18 @@ def _render_scene(
       mainVideo.loop = true;
       mainVideo.muted = true;
       mainVideo.playsInline = true;
+      mainVideo.setAttribute("data-current", "default");
       mainVideo.play().catch(() => {{}});
     }}
 
     function playEmotionLoop() {{
-      if (!mainVideo) return;
-      if (!emotionSrc) return;
+      if (!mainVideo || !emotionSrc) return;
+      if (mainVideo.getAttribute("data-current") === "emotion") {{
+        if (mainVideo.paused) {{
+          mainVideo.play().catch(() => {{}});
+        }}
+        return;
+      }}
       mainVideo.pause();
       if (mainVideo.firstElementChild && mainVideo.firstElementChild.tagName === "SOURCE") {{
         mainVideo.firstElementChild.setAttribute("src", emotionSrc);
@@ -224,8 +233,9 @@ def _render_scene(
         mainVideo.load();
       }} catch (e) {{}}
       mainVideo.loop = true;
-      mainVideo.muted = true;  // ensure autoplay is allowed
+      mainVideo.muted = true;
       mainVideo.playsInline = true;
+      mainVideo.setAttribute("data-current", "emotion");
       mainVideo.play().catch(() => {{}});
     }}
 
@@ -233,31 +243,41 @@ def _render_scene(
     playDefaultLoop();
 
     if (speechAudio) {{
+      const switchBackToDefault = () => {{
+        playDefaultLoop();
+      }};
+
       speechAudio.addEventListener("play", () => {{
         if (emotionSrc) {{
           playEmotionLoop();
-        }}
-      }});
-      speechAudio.addEventListener("ended", () => {{
-        playDefaultLoop();
-      }});
-      speechAudio.addEventListener("pause", () => {{
-        if (speechAudio.duration && (speechAudio.currentTime >= speechAudio.duration - 0.1)) {{
+        }} else {{
           playDefaultLoop();
         }}
       }});
+
+      speechAudio.addEventListener("ended", switchBackToDefault);
+      speechAudio.addEventListener("error", switchBackToDefault);
+      speechAudio.addEventListener("abort", switchBackToDefault);
+
+      speechAudio.addEventListener("pause", () => {{
+        if (!speechAudio.duration) return;
+        const remaining = speechAudio.duration - speechAudio.currentTime;
+        if (remaining <= 0.05) {{
+          switchBackToDefault();
+        }}
+      }});
     }}
-        
+
     if (btn && audio) {{
       audio.volume = 0.15;
-    
+
       // Ensure default is OFF
       if (localStorage.getItem("musicEnabled") === null) {{
           localStorage.setItem("musicEnabled", "0");
       }}
-    
+
       const enabled = localStorage.getItem("musicEnabled") === "1";
-    
+
       if (enabled) {{
         btn.classList.add("active");
         audio.play().catch(() => {{}});
@@ -265,7 +285,7 @@ def _render_scene(
         btn.classList.remove("active");
         audio.pause();
       }}
-    
+
       btn.addEventListener("click", () => {{
         const nowEnabled = btn.classList.toggle("active");
         localStorage.setItem("musicEnabled", nowEnabled ? "1" : "0");
