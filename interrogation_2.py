@@ -90,49 +90,48 @@ def _render_scene(
     <html>
     <head>
       <style>
-        body {{
+        html, body {{
           margin: 0;
+          padding: 0;
           background-color: black;
           color: white;
           font-family: system-ui, sans-serif;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: flex-start;
-          height: 100vh;
-          padding-top: 20px;
-        }}
-        .video-stage {{
-          position: relative;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          transform: scale(0.5);
-          transform-origin: top center;
+          height: 100%;
           width: 100%;
-          height: auto;
-        }}
-        .video-inner {{
-          position: relative;
           overflow: hidden;
-          width: 130%;
-          height: auto;
-          display: flex;
-          justify-content: center;
-          align-items: center;
+        }}
+
+        .stage-root {{
+          position: relative;
+          width: 100%;
+          height: 100%;
           background-color: black;
         }}
-        #mainVideo {{
+
+        /* Video container fills iframe */
+        .video-stage {{
           position: relative;
-          display: block;
           width: 100%;
-          height: auto;
+          height: 100%;
+          background-color: black;
+        }}
+
+        /* Absolutely center the video; no cropping, just letterboxing */
+        #mainVideo {{
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
           max-width: 100%;
           max-height: 100%;
+          width: auto;
+          height: auto;
           object-fit: contain;
           object-position: center center;
           z-index: 1;
+          display: block;
         }}
+
         .music-btn {{
           position: fixed;
           top: 80px;
@@ -148,14 +147,15 @@ def _render_scene(
           justify-content: center;
           cursor: pointer;
         }}
+
         .music-btn.active {{
           background-color: rgba(255,255,255,0.4);
         }}
       </style>
     </head>
     <body>
-      <div class="video-stage">
-        <div class="video-inner">
+      <div class="stage-root">
+        <div class="video-stage">
           <video id="mainVideo" autoplay loop muted playsinline>
             <source src="{default_loop_video_src}" type="video/mp4">
           </video>
@@ -298,7 +298,6 @@ def _render_scene(
     }}
 
     </script>
-
     </body>
     </html>
     """
@@ -471,7 +470,7 @@ def main() -> None:
         iframe[title="st.iframe"] {
             position: fixed !important;
             top: 0; left: 0;
-            width: 100vw !important;
+            width: 100% !important;
             height: var(--stage-h) !important;
             z-index: 9998;
             border: none;
