@@ -545,16 +545,27 @@ def main() -> None:
     st.markdown(
         """
         <script>
-        setTimeout(() => {
-          const chatList = parent.document.querySelector('[data-testid="stChatMessageList"]');
-          if (chatList) {
+        (function() {
+          function scrollChatToBottom() {
+            const chatList = document.querySelector('[data-testid="stChatMessageList"]');
+            if (!chatList) {
+              // Try again shortly if the element is not yet in the DOM
+              setTimeout(scrollChatToBottom, 200);
+              return;
+            }
             chatList.scrollTop = chatList.scrollHeight;
           }
-        }, 100);
+
+          // Run once after this render cycle
+          setTimeout(scrollChatToBottom, 100);
+          // Safety second run for slower renders
+          setTimeout(scrollChatToBottom, 500);
+        })();
         </script>
         """,
         unsafe_allow_html=True,
     )
+
 
     if st.session_state.pending_user_input:
         user_text = st.session_state.pending_user_input
