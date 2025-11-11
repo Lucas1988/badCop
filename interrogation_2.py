@@ -363,7 +363,7 @@ def _get_officer_reply_and_audio(
         "Your tone is calm, professional, and precise. "
         "Keep answers short, serious, and under 20 words. "
         "Ask pointed follow-up questions about times, methods, and accomplices. "
-        "Make sure the text includes tags like <angry>, <sad>, <coughs>, <giggles>, etc. to indicate the tone. "
+        "Make sure the text includes fitting tags like [angry], [sad], [coughs], [giggles], etc, or sound effects. "
         "Respond strictly as JSON: {\"text\": \"...\", \"emotion\": \"angry|sad|neutral\"}."
     )
 
