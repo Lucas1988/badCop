@@ -404,7 +404,7 @@ def _get_officer_reply_and_audio(
         "Ask pointed follow-up questions about times, methods, and accomplices. "
         "Make sure the text includes fitting tags like [angry], [sad], [coughs], [giggles], etc, or sound effects. "
         "There is room for some humor in this. Perhaps the officer is a bit sarcastic at times. And maybe even bribable?"
-        "Respond strictly as JSON: {\"text\": \"...\", \"emotion\": \"angry|sad|neutral|laughing|suspicious\"}."
+        "Respond strictly as JSON: {\"text\": \"...\", \"emotion\": \"angry|cynical|happy|neutral|sad|surprised|suspicious\"}."
     )
 
     messages_for_llm = [
@@ -476,11 +476,11 @@ def main() -> None:
 
     _ensure_session()
 
-    default_loop_path = Path().joinpath("static", "police_officer.mp4")
+    default_loop_path = Path().joinpath("static", "officer_loop.mp4")
     bg_audio_path = Path().joinpath("static", "tension.mp3")
 
     if not default_loop_path.exists():
-        st.error("Video file not found (expected 'static/police_officer.mp4').")
+        st.error("Video file not found (expected 'static/officer_loop.mp4').")
         return
 
     default_loop_src = _get_base64_video(default_loop_path)
