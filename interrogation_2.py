@@ -247,11 +247,17 @@ def _render_scene(
         }}
       }});
     }}
-
+        
     if (btn && audio) {{
       audio.volume = 0.15;
-      const stored = localStorage.getItem("musicEnabled");
-      const enabled = stored === "1";
+    
+      // Ensure default is OFF
+      if (localStorage.getItem("musicEnabled") === null) {{
+          localStorage.setItem("musicEnabled", "0");
+      }}
+    
+      const enabled = localStorage.getItem("musicEnabled") === "1";
+    
       if (enabled) {{
         btn.classList.add("active");
         audio.play().catch(() => {{}});
@@ -259,6 +265,7 @@ def _render_scene(
         btn.classList.remove("active");
         audio.pause();
       }}
+    
       btn.addEventListener("click", () => {{
         const nowEnabled = btn.classList.toggle("active");
         localStorage.setItem("musicEnabled", nowEnabled ? "1" : "0");
@@ -269,6 +276,7 @@ def _render_scene(
         }}
       }});
     }}
+
     </script>
 
     </body>
@@ -300,9 +308,19 @@ def _append_assistant_message(text: str) -> None:
 
 
 def _render_history() -> None:
+    """
+    Render all chat messages in the Streamlit UI while removing stage-direction
+    tags enclosed in square brackets.
+
+    :return: None
+    """
+    import re
+
     for m in st.session_state.messages:
+        cleaned: str = re.sub(r"\[.*?\]", "", m["content"]).strip()
         with st.chat_message(m["role"]):
-            st.markdown(m["content"])
+            st.markdown(cleaned)
+
 
 
 def _generate_officer_audio(spoken_text: str) -> Optional[Path]:
@@ -313,11 +331,12 @@ def _generate_officer_audio(spoken_text: str) -> Optional[Path]:
     :return: Path to generated MP3 or None if failed
     """
     api_key: Optional[str] = os.environ.get("ELEVENLABS_API_KEY")
+    eleven_labs_model: Optional[str] = os.environ.get("ELEVENLABS_MODEL", "eleven_v3")
     if not api_key:
         return None
     voice_id: str = "VMEiS9pN5WcJdwYFOr4i"
     url: str = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-    payload: dict[str, Any] = {"text": spoken_text, "model_id": "eleven_v3"}
+    payload: dict[str, Any] = {"text": spoken_text, "model_id": eleven_labs_model}
     headers: dict[str, str] = {
         "xi-api-key": api_key,
         "Content-Type": "application/json",
@@ -364,7 +383,8 @@ def _get_officer_reply_and_audio(
         "Keep answers short, serious, and under 20 words. "
         "Ask pointed follow-up questions about times, methods, and accomplices. "
         "Make sure the text includes fitting tags like [angry], [sad], [coughs], [giggles], etc, or sound effects. "
-        "Respond strictly as JSON: {\"text\": \"...\", \"emotion\": \"angry|sad|neutral\"}."
+        "There is room for some humor in this. Perhaps the officer is a bit sarcastic at times. And maybe even bribable?"
+        "Respond strictly as JSON: {\"text\": \"...\", \"emotion\": \"angry|sad|neutral|laughing|suspicious\"}."
     )
 
     messages_for_llm = [
@@ -377,7 +397,7 @@ def _get_officer_reply_and_audio(
 
     try:
         response = client.chat.completions.create(
-            model=os.environ.get("MODEL_NAME", "gpt-5-nano"),
+            model=os.environ.get("MODEL_NAME", "gpt-4.1-nano"),
             messages=messages_for_llm,
             response_format={"type": "json_object"},
         )
